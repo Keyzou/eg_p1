@@ -6,7 +6,8 @@ public class CaseController : MonoBehaviour {
 
     private Color defaultMaterialColor;
     private Color oldMaterialColor;
-    public Color hoverColor = new Color (0.15f, 0.7f, 1f);
+    public Material HighlightMaterial;
+    public Color hoverColor = new Color (0.15f, 0.5f, 0.9f);
     private Color defaultHighlightColor = new Color (1f, 0.2f, 0f);
     public Vector2Int Position;
 
@@ -19,7 +20,8 @@ public class CaseController : MonoBehaviour {
     }
 
     public void Highlight (Color highlightColor) {
-        this.GetComponent<MeshRenderer> ().materials[0].color = highlightColor;
+        Debug.Log(this.GetComponent<MeshRenderer>().materials[0].name);
+        this.GetComponent<MeshRenderer>().materials[0].color = Color.Lerp(highlightColor, this.GetComponent<MeshRenderer>().materials[0].name == "Black_Case (Instance)" ? Color.black : Color.white, .25f);
         this.IsHighlighten = true;
     }
 

@@ -3,33 +3,21 @@ using System.Collections.Generic;
 using UnityEngine;
 
 [RequireComponent (typeof (Outline))]
-public class PieceController : MonoBehaviour {
+public abstract class PieceController : MonoBehaviour {
 
-    public Color hoverColor;
-    public Color selectedColor;
+    public Team team;
+    public Vector2Int coordinates;
+    public Color hoverColor = new Color(112 / 255f, 229 / 255f, 1f);
+    public Color selectedColor = new Color(107 / 255f, 221 / 255f, 41 / 255f);
     public bool Selected { get; set; }
 
-    public Vector2Int coordinates;
     private bool hover;
 
-    // Start is called before the first frame update
-    void Start () {
+    public abstract List<Vector2Int> GetPossiblePositions(CaseController[] board);
+
+    public virtual void OnPieceMoved() {
 
     }
-
-    public List<Vector2Int> GetPossiblePositions () {
-        var possiblePositions = new List<Vector2Int> ();
-        possiblePositions.Add (new Vector2Int (coordinates.x - 1, coordinates.y + 2));
-        possiblePositions.Add (new Vector2Int (coordinates.x + 1, coordinates.y + 2));
-        possiblePositions.Add (new Vector2Int (coordinates.x - 1, coordinates.y - 2));
-        possiblePositions.Add (new Vector2Int (coordinates.x + 1, coordinates.y - 2));
-        possiblePositions.Add (new Vector2Int (coordinates.x + 2, coordinates.y + 1));
-        possiblePositions.Add (new Vector2Int (coordinates.x + 2, coordinates.y - 1));
-        possiblePositions.Add (new Vector2Int (coordinates.x - 2, coordinates.y + 1));
-        possiblePositions.Add (new Vector2Int (coordinates.x - 2, coordinates.y - 1));
-        return possiblePositions;
-    }
-
     void OnMouseOver () {
         this.hover = true;
     }
@@ -39,8 +27,13 @@ public class PieceController : MonoBehaviour {
     }
 
     // Update is called once per frame
-    void Update () {
+    protected void Update () {
         this.GetComponent<Outline> ().enabled = Selected || hover;
         this.GetComponent<Outline> ().OutlineColor = Selected ? selectedColor : hoverColor;
+    }
+
+    public enum Team {
+        WHITE,
+        BLACK
     }
 }

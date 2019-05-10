@@ -6,16 +6,34 @@ using UnityEngine;
 public class GameController : MonoBehaviour
 {
     public GameObject Chessboard;
-    public PieceController[] Pieces;
+    private PieceController[] whitePieces;
+    private PieceController[] blackPieces;
+
+    public int turnCount;
+
+    public PieceController.Team currentTeam = PieceController.Team.WHITE;
+
     public PieceController SelectedPiece;
     private List<CaseController> highlightenCases;
+    public CaseController[] Board;
 
+    [Header("Board Generation")]
     public GameObject whiteTile;
     public GameObject blackTile;
-    public CaseController[] Board;
+    [Space(10f)]
+    public Material whitePieceMaterial;
+    public Material blackPieceMaterial;
+    [Space(10f)]
+    public GameObject PawnPrefab;
+    public GameObject RookPrefab;
+    public GameObject KnightPrefab;
+    public GameObject BishopPrefab;
+    public GameObject QueenPrefab;
+    public GameObject KingPrefab;
     void Start()
     {
-        Pieces = FindObjectsOfType<PieceController>();
+        whitePieces = new PieceController[16];
+        blackPieces = new PieceController[16];
         Board = new CaseController[8 * 8];
         highlightenCases = new List<CaseController>();
         int count = 0;
@@ -26,7 +44,7 @@ public class GameController : MonoBehaviour
             {
                 var tile = count % 2 == 0 ? whiteTile : blackTile;
                 var obj = Instantiate(tile, Vector3.right * x * 10 + Vector3.forward * y * 10, Quaternion.identity);
-                obj.transform.parent = Chessboard.transform;
+                obj.transform.parent = Chessboard.transform.Find("Tiles");
                 obj.name = string.Format("{0}x{1}", x, y);
                 Board[x + y * 8] = obj.AddComponent<CaseController>();
                 obj.GetComponent<CaseController>().Position = new Vector2Int(x, y);
@@ -36,11 +54,28 @@ public class GameController : MonoBehaviour
         }
 
         // After we created the tiles, we add every pieces to the board
-        foreach (var piece in Pieces)
-        {
-            piece.transform.position = Board[piece.coordinates.x + 8 * piece.coordinates.y].transform.position + Vector3.up * 2.73f;
-            Board[piece.coordinates.x + 8 * piece.coordinates.y].Piece = piece;
+
+        // TODO: Better generation
+        AddPiecesToBoard();
+
+        var pieces = Chessboard.transform.Find("Pieces");
+        var whiteCount = 0;
+        var blackCount = 0;
+
+        for (int i = 0; i < pieces.childCount; i++) {
+            var piece = pieces.GetChild(i).gameObject.GetComponent<PieceController>();
+            if(piece.team == PieceController.Team.WHITE) {
+                whitePieces[whiteCount] = piece;
+                whiteCount++;
+            }
+
+            if(piece.team == PieceController.Team.BLACK) {
+                piece.GetComponent<MeshCollider>().enabled = false;
+                blackPieces[blackCount] = piece;
+                blackCount++;
+            }
         }
+
     }
 
     void LateUpdate()
@@ -64,28 +99,24 @@ public class GameController : MonoBehaviour
                 this.SelectedPiece = hitObj.transform.GetComponent<PieceController>();
                 this.SelectedPiece.Selected = true;
                 // We check every possible move for the piece, excluding impossible ones like going off the board or on an ally piece
-                foreach (var coord in this.SelectedPiece.GetPossiblePositions())
+                foreach (var coord in this.SelectedPiece.GetPossiblePositions(Board))
                 {
-                    // We make sure it is inside the board
-                    if (coord.x >= 8 || coord.x < 0 || coord.y >= 8 || coord.y < 0)
-                    {
+                    if(coord.x >= 8 || coord.x < 0 || coord.y >= 8 || coord.y < 0)
                         continue;
-                    }
-
-                    // And not on another piece
-                    if(Board[coord.x + 8 * coord.y].Piece != null) {
-                        continue;
-                    }
-
                     highlightenCases.Add(Board[coord.x + 8 * coord.y]);
                     if (!Board[coord.x + 8 * coord.y].IsHighlighten)
                     {
-                        Board[coord.x + 8 * coord.y].Highlight(Color.red);
+                        Color highlightColor = new Color (0.15f, 1f, 0.7f);
+                        if(Board[coord.x + 8 * coord.y].Piece != null && Board[coord.x + 8 * coord.y].Piece.team != this.SelectedPiece.team) {
+                            highlightColor = Color.red;
+                        }
+                        Board[coord.x + 8 * coord.y].Highlight(highlightColor);
                     }
                 }
 
             // If we click a tile
-            } else if (hits && hitObj.transform.GetComponent<CaseController>() != null)
+            } 
+            else if (hits && hitObj.transform.GetComponent<CaseController>() != null)
             {
                 var caseController = hitObj.transform.GetComponent<CaseController>();
 
@@ -96,23 +127,56 @@ public class GameController : MonoBehaviour
                     if (index != -1)
                     {
                         Board[this.SelectedPiece.coordinates.x + 8 * this.SelectedPiece.coordinates.y].Piece = null;
+                        StartCoroutine(MovePiece(this.SelectedPiece, caseController.transform.position + Vector3.up * .5f, 4f));
                         this.SelectedPiece.coordinates = new Vector2Int(index % 8, index / 8);
-                        StartCoroutine(MovePiece(this.SelectedPiece, caseController.transform.position + Vector3.up * 2.73f, 4f));
+                        if(caseController.Piece != null && caseController.Piece.team != this.SelectedPiece.team) {
+                            // TODO: Magic will happen here !
+                            Destroy(caseController.Piece.gameObject);
+                        }
                         Board[this.SelectedPiece.coordinates.x + 8 * this.SelectedPiece.coordinates.y].Piece = this.SelectedPiece;
+                        this.SelectedPiece.OnPieceMoved();
+
+
+                        // If the player has made a move, we finish the turn.
+                        // First, we disable mesh colliders so we can't click the current team's pieces
+                        // Then we enable mesh colliders of the other's team, so it can play.
+                        // And then we "officially" change the current team to be the other team.
+                        
+                        switch(currentTeam) {
+                            case PieceController.Team.BLACK:
+                                for(int i = 0; i < blackPieces.Length; i++) {
+                                    blackPieces[i].GetComponent<MeshCollider>().enabled = false;
+                                }
+                                for(int i = 0; i < whitePieces.Length; i++) {
+                                    whitePieces[i].GetComponent<MeshCollider>().enabled = true;
+                                }
+                            break;
+                            default:
+                            case PieceController.Team.WHITE:
+                                for(int i = 0; i < blackPieces.Length; i++) {
+                                    blackPieces[i].GetComponent<MeshCollider>().enabled = true;
+                                }
+                                for(int i = 0; i < whitePieces.Length; i++) {
+                                    whitePieces[i].GetComponent<MeshCollider>().enabled = false;
+                                }
+                            break;
+                        }
+                        currentTeam = currentTeam == PieceController.Team.WHITE ? PieceController.Team.BLACK : PieceController.Team.WHITE;
                     }
 
-                    // And then we clear the board, removing highlights and unselecting the piece
-                    highlightenCases.ForEach((c) => c.RemoveHighlight());
-                    highlightenCases.Clear();
-                    if (this.SelectedPiece != null) 
-                    {
-                        this.SelectedPiece.Selected = false;
-                    }
-                    this.SelectedPiece = null;
                 }
+                // And then we clear the board, removing highlights and unselecting the piece
+                highlightenCases.ForEach((c) => c.RemoveHighlight());
+                highlightenCases.Clear();
+                if (this.SelectedPiece != null) 
+                {
+                    this.SelectedPiece.Selected = false;
+                }
+                this.SelectedPiece = null;
 
             // If we hit nothing important, we unselect the piece if one was selected, and we remove every highlights
-            } else if(!hits || (hits && hitObj.transform.GetComponent<CaseController>() == null && hitObj.transform.GetComponent<PieceController>() == null)) {
+            } 
+            else if(!hits || (hits && hitObj.transform.GetComponent<CaseController>() == null && hitObj.transform.GetComponent<PieceController>() == null)) {
                 if (this.SelectedPiece != null) 
                 {
                     this.SelectedPiece.Selected = false;
@@ -126,11 +190,194 @@ public class GameController : MonoBehaviour
 
         // Coroutine used to move a piece to another point smoothly
         IEnumerator MovePiece(PieceController piece, Vector3 to, float speed) {
-            while(Vector3.Distance(piece.transform.position, to) > 0.0001f)  {
-                piece.transform.position = Vector3.Lerp(piece.transform.position, to, speed * Time.deltaTime);
+            var startingPos = piece.transform.position;
+            var elaspedTime = 0f;
+            var time = 0.5f;
+            while(elaspedTime < time)  {
+                piece.transform.position = Vector3.Lerp(startingPos, to, Mathf.SmoothStep(0, 1, elaspedTime / time));
+                elaspedTime += Time.deltaTime;
                 yield return null;
-            } 
+            }
             yield break;
+        }
+    }
+
+
+    // FIXME: Better way to generate pieces on the board!
+    private void AddPiecesToBoard() {
+        GameObject go;
+        
+        ///////////////////////////////
+        // We generate white team first
+        ///////////////////////////////
+
+        // Rooks
+        go = Instantiate(RookPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+        go.GetComponent<PieceController>().team = PieceController.Team.WHITE;
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+        go = Instantiate(RookPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+        go.GetComponent<PieceController>().team = PieceController.Team.WHITE;
+        go.GetComponent<PieceController>().coordinates = new Vector2Int(7 - go.GetComponent<PieceController>().coordinates.x, go.GetComponent<PieceController>().coordinates.y);
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+        // Knights
+        go = Instantiate(KnightPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+        go.GetComponent<PieceController>().team = PieceController.Team.WHITE;
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+        go = Instantiate(KnightPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+        go.GetComponent<PieceController>().team = PieceController.Team.WHITE;
+        go.GetComponent<PieceController>().coordinates = new Vector2Int(7 - go.GetComponent<PieceController>().coordinates.x, go.GetComponent<PieceController>().coordinates.y);
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+
+        // Bishops
+        go = Instantiate(BishopPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+        go.GetComponent<PieceController>().team = PieceController.Team.WHITE;
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+        go = Instantiate(BishopPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+        go.GetComponent<PieceController>().team = PieceController.Team.WHITE;
+        go.GetComponent<PieceController>().coordinates = new Vector2Int(7 - go.GetComponent<PieceController>().coordinates.x, go.GetComponent<PieceController>().coordinates.y);
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+        // King
+        go = Instantiate(KingPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+        go.GetComponent<PieceController>().team = PieceController.Team.WHITE;
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+        // Queen
+        go = Instantiate(QueenPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+        go.GetComponent<PieceController>().team = PieceController.Team.WHITE;
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+        // Pawns
+        for(int i = 0; i < 8; i++) {
+            go = Instantiate(PawnPrefab, Vector3.zero, Quaternion.identity);
+            go.transform.parent = Chessboard.transform.Find("Pieces");
+            go.GetComponent<PieceController>().team = PieceController.Team.WHITE;
+            go.GetComponent<PawnController>().coordinates = new Vector2Int(i, 1);
+            go.transform.position = Board[i + 8 * 1].transform.position + Vector3.up * 0.5f;
+            Board[i + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        }
+        
+        ///////////////////////////////
+        // We generate black team then
+        ///////////////////////////////
+
+
+        // Rooks =========================
+        
+        go = Instantiate(RookPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+        
+        // We set the material and the team to the black one since it's the black team
+        go.GetComponent<MeshRenderer>().material = blackPieceMaterial;
+        go.GetComponent<PieceController>().team = PieceController.Team.BLACK;
+
+        go.GetComponent<PieceController>().coordinates.y = 7 - go.GetComponent<PieceController>().coordinates.y;
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+        // Second one
+
+        go = Instantiate(RookPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+
+        go.GetComponent<MeshRenderer>().material = blackPieceMaterial;
+        go.GetComponent<PieceController>().team = PieceController.Team.BLACK;
+
+        go.GetComponent<PieceController>().coordinates.y = 7 - go.GetComponent<PieceController>().coordinates.y;
+        go.GetComponent<PieceController>().coordinates = new Vector2Int(7 - go.GetComponent<PieceController>().coordinates.x, go.GetComponent<PieceController>().coordinates.y);
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+        // Knights =========================
+
+        go = Instantiate(KnightPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+        go.GetComponent<MeshRenderer>().material = blackPieceMaterial;
+        go.GetComponent<PieceController>().team = PieceController.Team.BLACK;
+        go.GetComponent<PieceController>().coordinates.y = 7 - go.GetComponent<PieceController>().coordinates.y;
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+        go = Instantiate(KnightPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+        go.GetComponent<MeshRenderer>().material = blackPieceMaterial;
+        go.GetComponent<PieceController>().team = PieceController.Team.BLACK;
+        go.GetComponent<PieceController>().coordinates.y = 7 - go.GetComponent<PieceController>().coordinates.y;
+        go.GetComponent<PieceController>().coordinates = new Vector2Int(7 - go.GetComponent<PieceController>().coordinates.x, go.GetComponent<PieceController>().coordinates.y);
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+        // Bishops =========================
+
+        go = Instantiate(BishopPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+        go.GetComponent<MeshRenderer>().material = blackPieceMaterial;
+        go.GetComponent<PieceController>().team = PieceController.Team.BLACK;
+        go.GetComponent<PieceController>().coordinates.y = 7 - go.GetComponent<PieceController>().coordinates.y;
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+        go = Instantiate(BishopPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+        go.GetComponent<MeshRenderer>().material = blackPieceMaterial;
+        go.GetComponent<PieceController>().team = PieceController.Team.BLACK;
+        go.GetComponent<PieceController>().coordinates.y = 7 - go.GetComponent<PieceController>().coordinates.y;
+        go.GetComponent<PieceController>().coordinates = new Vector2Int(7 - go.GetComponent<PieceController>().coordinates.x, go.GetComponent<PieceController>().coordinates.y);
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+        // King =========================
+        
+        go = Instantiate(KingPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+        go.GetComponent<MeshRenderer>().material = blackPieceMaterial;
+        go.GetComponent<PieceController>().team = PieceController.Team.BLACK;
+        go.GetComponent<PieceController>().coordinates.y = 7 - go.GetComponent<PieceController>().coordinates.y;
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+        // Queen =========================
+
+        go = Instantiate(QueenPrefab, Vector3.zero, Quaternion.identity);
+        go.transform.parent = Chessboard.transform.Find("Pieces");
+        go.GetComponent<MeshRenderer>().material = blackPieceMaterial;
+        go.GetComponent<PieceController>().team = PieceController.Team.BLACK;
+        go.GetComponent<PieceController>().coordinates.y = 7 - go.GetComponent<PieceController>().coordinates.y;
+        go.transform.position = Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+        Board[go.GetComponent<PieceController>().coordinates.x + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
+        
+        // Pawns =========================
+        
+        for(int i = 0; i < 8; i++) {
+            go = Instantiate(PawnPrefab, Vector3.zero, Quaternion.identity);
+            go.transform.parent = Chessboard.transform.Find("Pieces");
+        go.GetComponent<MeshRenderer>().material = blackPieceMaterial;
+            go.GetComponent<PieceController>().team = PieceController.Team.BLACK;
+            go.GetComponent<PawnController>().coordinates = new Vector2Int(i, 1);
+            go.GetComponent<PieceController>().coordinates.y = 7 - go.GetComponent<PieceController>().coordinates.y;
+            go.transform.position = Board[i + 8 * go.GetComponent<PieceController>().coordinates.y].transform.position + Vector3.up * 0.5f;
+            Board[i + 8 * go.GetComponent<PieceController>().coordinates.y].Piece = go.GetComponent<PieceController>();
         }
     }
 }
